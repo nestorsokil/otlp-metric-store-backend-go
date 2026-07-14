@@ -37,10 +37,15 @@ Reads resolve SeriesIds from the small series table, then range-scan datapoints 
 ### Series dedup cache (`series_cache.go`, new)
 - **Responsibility**: decide whether a series row needs (re)emitting, keeping series-table writes
   off the per-datapoint hot path.
+- **Why it matters**: without it, a series row is written **per datapoint**, turning `otel_series`
+  into a second write-heavy table — write amplification plus the background merge load of collapsing
+  all those rows. The cache collapses that to ~one write per series per `refreshInterval`, so
+  series-table writes scale with `# series × refresh rate`, not datapoint count (C-3).
 - **Interface**: `ShouldEmit(id uint64, now time.Time) bool` — true if unseen or `lastEmitted`
   older than `refreshInterval` (bumps `LastSeen` so time-pruning stays accurate).
 - **Dependencies**: concurrent LRU with TTL eviction (bounded memory; tracks the active series).
-  Correctness never depends on cache state (C-4) — it is purely write reduction.
+  Correctness never depends on cache state (C-4) — it is purely write reduction; reads stay correct
+  via `FINAL` regardless of how many series rows the cache lets through.
 
 ### MetricsStore (`clickhouse_client.go`)
 - **Responsibility**: create tables; upsert series rows; batch-insert skinny datapoints.
@@ -152,8 +157,17 @@ WHERE dp.SeriesId IN (
     )
   AND dp.TimeUnix BETWEEN :from AND :to;             -- authoritative time bound + partition prune
 ```
-`FINAL` is acceptable because `otel_series` is small (low cardinality). At larger scale, replace it
-with `GROUP BY SeriesId HAVING max(LastSeen) >= :from AND min(FirstSeen) <= :to`.
+**Why `FINAL`**: background merges are eventual, so at any moment a `SeriesId` may have several
+unmerged rows each carrying only one emit's partial `FirstSeen`/`LastSeen`. `FINAL` applies the
+`min`/`max` merge at read time so the window filter sees the true activity span — without it the
+filter can silently drop a series whose emits straddle the window but none land inside it.
+
+[](https://clickhouse.com/docs/sql-reference/statements/select/from#final-modifier)
+
+**Why it's OK here**: (1) `otel_series` is small (low cardinality); (2) this is a write-heavy
+telemetry system where **reads ≪ writes** — paying a modest read-time merge cost on a rare query to
+keep the hot write path cheap is the right trade. At larger read scale, it's better to swap `FINAL` for
+`GROUP BY SeriesId HAVING max(LastSeen) >= :from AND min(FirstSeen) <= :to`. The downside is that with this approach you must pick the right aggreate function for each series-level constant (e.g., `anyLast` for description/unit, `any` for monotonicity/temporality) so the query returns the correct values.
 
 ## Metrics
 - `series_registered_total` — counter, series rows emitted (want ≪ datapoints ingested).
