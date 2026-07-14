@@ -47,9 +47,11 @@
   **BREAKING: row structs change shape.** (`clickhouse_client.go`, `metrics_mapper.go`)
   - Spec: design §MetricsStore §Schema, AC-1 AC-4
   - Review: —
-- [ ] [small] **5. Wire Export handler** — compute SeriesIds, gate series rows via `ShouldEmit`,
+- [x] [small] **5. Wire Export handler** — compute SeriesIds, gate series rows via `ShouldEmit`,
   `InsertSeries` **then `MarkEmitted` only on success**, then insert datapoints. Add
-  `series_registered_total` / `series_cache_size`. (`metrics_service.go`, `otel.go`)
+  `series_registered_total` / `series_cache_size`. (`metrics_service.go`, `server.go` — instrument
+  declarations live next to `metricsReceivedCounter` in `server.go`, not `otel.go`, which is pure
+  SDK bootstrap with no meter instruments; tweak)
   - Spec: design §Export handler §Data flow §Metrics, AC-1 AC-5
   - Review: —
 - [ ] [medium] **6. Query interface** — `MetricsQuerier` with `DatapointQuery`/`Datapoint` and

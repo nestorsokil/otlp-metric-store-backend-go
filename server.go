@@ -25,9 +25,11 @@ var (
 const name = "dash0.com/otlp-log-processor-backend"
 
 var (
-	meter                  = otel.Meter(name)
-	logger                 = otelslog.NewLogger(name)
-	metricsReceivedCounter metric.Int64Counter
+	meter                   = otel.Meter(name)
+	logger                  = otelslog.NewLogger(name)
+	metricsReceivedCounter  metric.Int64Counter
+	seriesRegisteredCounter metric.Int64Counter
+	seriesCacheSizeGauge    metric.Int64Gauge
 )
 
 func init() {
@@ -35,6 +37,20 @@ func init() {
 	metricsReceivedCounter, err = meter.Int64Counter("com.dash0.homeexercise.metrics.received",
 		metric.WithDescription("The number of metrics received by otlp-metrics-processor-backend"),
 		metric.WithUnit("{metric}"))
+	if err != nil {
+		panic(err)
+	}
+
+	seriesRegisteredCounter, err = meter.Int64Counter("com.dash0.homeexercise.metrics.series_registered_total",
+		metric.WithDescription("The number of series rows emitted to otel_series (want much less than datapoints ingested)"),
+		metric.WithUnit("{series}"))
+	if err != nil {
+		panic(err)
+	}
+
+	seriesCacheSizeGauge, err = meter.Int64Gauge("com.dash0.homeexercise.metrics.series_cache_size",
+		metric.WithDescription("The number of active series currently tracked by the dedup cache"),
+		metric.WithUnit("{series}"))
 	if err != nil {
 		panic(err)
 	}
