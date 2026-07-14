@@ -54,7 +54,7 @@
   SDK bootstrap with no meter instruments; tweak)
   - Spec: design §Export handler §Data flow §Metrics, AC-1 AC-5
   - Review: —
-- [ ] [medium] **6. Query interface** — `MetricsQuerier` with `DatapointQuery`/`Datapoint` and
+- [x] [medium] **6. Query interface** — `MetricsQuerier` with `DatapointQuery`/`Datapoint` and
   `QueryDatapoints(ctx, q) ([]Datapoint, truncated bool, err error)` on `ClickHouseMetricsStore`.
   Build the query dynamically: `From`/`To` + `MetricType` required (the latter selects the table, it
   is not a filter); **every filter emits its clause only when set** (C-2). Use
