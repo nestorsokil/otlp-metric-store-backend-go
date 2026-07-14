@@ -348,3 +348,8 @@ enough context to debug from alone, and no line is noise. Structured `slog` with
   of the lowest SeriesIds and none of the highest. Surfaced via the `truncated` return, never silent.
 - **Cold-start burst** — bounded and idempotent; the cache warm-read is a separate feature (NG-4).
 - **No retention** — tables grow without bound. Deliberate for this scope; symmetric TTLs are the fix.
+- **Multi-instance (NG-3)** — the cache is per-process, so N instances emit up to N× series rows; they
+  collapse, because `SeriesId` is content-addressed and `otel_series` is `ReplacingMergeTree`. No
+  coordination needed. The one skew: `LastSeen` is each instance's wall clock, so "latest wins" is
+  really "highest clock wins" — observable only on `MetricDescription`/`MetricUnit` (identity columns
+  are constant per `SeriesId`, so a wrong winner is a no-op there). Harmless at NTP skew.
