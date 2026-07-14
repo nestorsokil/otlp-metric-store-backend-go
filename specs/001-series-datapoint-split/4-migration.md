@@ -1,5 +1,5 @@
 # Wide-Table → Series/Datapoint Migration — Runbook
-> Status: draft
+> Status: approved
 
 ## Context
 > **Documented, not implemented.** This is the rollout plan for 001 *if* it is ever applied to an
@@ -52,12 +52,12 @@ the delivered test suite — the migration is documented, not built. Whoever run
 it.)
 
 ## Preconditions
-- 001 shipped: new-app image writes `otel_series` + skinny `_datapoints` tables via app-side dedup.
-- New tables created (`otel_series`, `otel_metrics_gauge_datapoints`, `otel_metrics_sum_datapoints`).
+- 001 shipped: new-app image writes `otel_series` + skinny `otel_datapoints_*` tables via app-side dedup.
+- New tables created (`otel_series`, `otel_datapoints_gauge`, `otel_datapoints_sum`).
 - Hash-parity verified (above).
 
 ## Steps
-1. **Create new tables.** `otel_series` + skinny `_datapoints` tables. No traffic yet; harmless if empty.
+1. **Create new tables.** `otel_series` + skinny `otel_datapoints_*` tables. No traffic yet; harmless if empty.
 2. **Attach bridge MVs** on the existing wide tables → derive `otel_series` rows and skinny datapoint
    rows from every *new* fat insert, computing `SeriesId` with the canonical SQL expression. Old apps
    remain untouched and keep serving.

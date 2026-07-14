@@ -1,5 +1,5 @@
 # Series / Datapoint Split — Requirements
-> Status: draft
+> Status: approved
 
 ## Overview
 Today every datapoint row carries the full metric identity (resource attributes, scope,

@@ -1,5 +1,5 @@
 # Series / Datapoint Split — Tasks
-> Status: draft
+> Status: approved
 
 `Review:` tracks self-review state — `—` (not implemented), `pending` (shipped, review deferred),
 `passed` (reviewed clean).
@@ -14,8 +14,8 @@
 - [ ] [medium] **1. Schema: series + skinny datapoint tables** — replace the 5 wide-table DDLs with
   `createSeriesTableSQL` (`otel_series`, **`ReplacingMergeTree(LastSeen)`**, plain columns, bloom
   indexes on resource/datapoint attribute maps, **no TTL**) and
-  `createGaugeTableSQL`/`createSumTableSQL` creating `otel_metrics_gauge_datapoints` /
-  `otel_metrics_sum_datapoints` as **`ReplacingMergeTree`** `ORDER BY (SeriesId, TimeUnix)`,
+  `createGaugeTableSQL`/`createSumTableSQL` creating `otel_datapoints_gauge` /
+  `otel_datapoints_sum` as **`ReplacingMergeTree`** `ORDER BY (SeriesId, TimeUnix)`,
   `PARTITION BY toDate(TimeUnix)`, no TTL. Update `CreateTables`.
   (`clickhouse_schema.go`, `clickhouse_client.go`)
   - Spec: design §Schema, AC-1 AC-4 AC-7, C-2

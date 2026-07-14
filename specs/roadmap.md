@@ -25,7 +25,7 @@ and never require a full table scan.
 
 | NNN | Feature | Purpose | Depends on | Status |
 |-----|---------|---------|------------|--------|
-| 001 | series-datapoint-split | Split Gauge+Sum storage into a shared series table + skinny datapoint tables, proven end-to-end | — | planned |
+| 001 | series-datapoint-split | Split Gauge+Sum storage into a shared series table + skinny datapoint tables, proven end-to-end | — | specced |
 | 002 | other-metric-types | Extend the split to Histogram, Exponential Histogram, Summary | 001 | planned |
 | 003 | series-cache-warmup | Pre-populate the dedup cache from ClickHouse on startup to avoid the restart re-insert burst | 001 | planned |
 | 004 | metrics-self-observability | Export the app's own OTel metrics via OTLP back into its own ingest path, self-stored + queryable via MetricsQuerier | 001 | planned |
@@ -49,7 +49,9 @@ is `specced` exactly when that feature's spec docs reach `approved`.
 
 ### 002 — other-metric-types
 - Scope sketch: `MapHistogramRows`/`MapSummaryRows`/`MapExponentialHistogramRows` → skinny
-  per-shape datapoint tables (`otel_metrics_histogram`, `_exp_histogram`, `_summary`) referencing
+  per-shape datapoint tables (`otel_datapoints_histogram`, `otel_datapoints_exp_histogram`,
+  `otel_datapoints_summary` — note the legacy wide tables already own `otel_metrics_histogram` et al.,
+  so the new prefix is what keeps them from colliding) referencing
   the shared `otel_series` table; extend the Export handler and integration suite. Series-level constants
   (temporality, bounds definitions) go on the lookup row, per the 001 pattern.
 - Touches: `metrics_mapper.go`, `clickhouse_schema.go`, `clickhouse_client.go`, `metrics_service.go`.

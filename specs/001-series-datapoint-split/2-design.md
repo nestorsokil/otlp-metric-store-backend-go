@@ -1,5 +1,5 @@
 # Series / Datapoint Split — Design
-> Status: draft
+> Status: approved
 
 ## Glossary
 Consistent terminology used across code, schema, and docs:
@@ -12,7 +12,7 @@ Consistent terminology used across code, schema, and docs:
 - **Series table** (`otel_series`) — the lookup table holding one row per series identity plus its
   series-level constants. The dimension side of a star schema.
 - **Datapoint** — a single observation of a series: `value + timestamp`, referencing a SeriesId.
-- **Datapoint table** (`otel_metrics_gauge_datapoints`, `otel_metrics_sum_datapoints`) — skinny
+- **Datapoint table** (`otel_datapoints_gauge`, `otel_datapoints_sum`) — skinny
   fact tables holding datapoints only. One per value shape. Named distinctly from the legacy wide
   tables so both can coexist during a migration (see `4-migration.md`).
 - **Series-level constant** — a field fixed for a series (MetricType, description, unit,
@@ -157,7 +157,7 @@ flowchart TD
     end
 
     Series --> CHs[(otel_series<br>ReplacingMergeTree)]
-    Points --> CHp[(*_datapoints<br>ReplacingMergeTree + async_insert)]
+    Points --> CHp[(otel_datapoints_*<br>ReplacingMergeTree + async_insert)]
 ```
 
 Series-first, so a crash between the two inserts leaves at worst a harmless orphan series row, never
@@ -227,10 +227,10 @@ ORDER BY (ServiceName, MetricName, SeriesId)
 SETTINGS index_granularity = 8192;
 ```
 
-**`otel_metrics_gauge_datapoints`** (and identical **`otel_metrics_sum_datapoints`**):
+**`otel_datapoints_gauge`** (and identical **`otel_datapoints_sum`**):
 
 ```sql
-CREATE TABLE IF NOT EXISTS otel_metrics_gauge_datapoints (
+CREATE TABLE IF NOT EXISTS otel_datapoints_gauge (
     SeriesId      UInt64 CODEC(ZSTD(1)),
     StartTimeUnix DateTime64(9) CODEC(Delta(8), ZSTD(1)),
     TimeUnix      DateTime64(9) CODEC(Delta(8), ZSTD(1)),
@@ -249,7 +249,7 @@ What `MetricsQuerier.QueryDatapoints` builds. Clauses for unset filters are omit
 
 ```sql
 SELECT s.SeriesId, s.ServiceName, s.MetricName, dp.TimeUnix, dp.Value
-FROM otel_metrics_gauge_datapoints AS dp
+FROM otel_datapoints_gauge AS dp
 INNER JOIN (
         SELECT DISTINCT SeriesId, ServiceName, MetricName
         FROM otel_series
@@ -327,9 +327,10 @@ enough context to debug from alone, and no line is noise. Structured `slog` with
 ## Migration & compatibility
 - **Ingest contract unchanged** — the gRPC OTLP `Export` surface is identical; producers need no
   change. The break is internal-only (`MetricsStore` Go interface + table schema), no external consumer.
-- **Datapoint tables use distinct `_datapoints` names**, never reusing the legacy wide-table names —
-  avoids the `CREATE TABLE IF NOT EXISTS` trap (it silently keeps an existing table's old schema) and
-  lets new and legacy tables coexist during a migration.
+- **Datapoint tables are named `otel_datapoints_<shape>`**, never reusing the legacy
+  `otel_metrics_<shape>` wide-table names — avoids the `CREATE TABLE IF NOT EXISTS` trap (it silently
+  keeps an existing table's old schema) and lets new and legacy tables coexist during a migration.
+  The `otel_datapoints_` prefix also groups the fact tables together, apart from the legacy set.
 - **Greenfield (this deploy)**: forward-only — create the new schema, done.
 - **Existing wide-table deployment**: documented in `4-migration.md`. **Not implemented** in this
   feature.
