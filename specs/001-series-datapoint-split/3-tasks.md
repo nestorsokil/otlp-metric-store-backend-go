@@ -83,6 +83,25 @@
   (`README.md`, `ASSIGNMENT.md`)
   - Spec: AC-3 AC-6, NG-1
   - Review: —
+- [x] [small] **9. Wire the ClickHouse store into `main()`** — pre-existing gap surfaced by
+  code review, not part of the series/datapoint split itself: `run()` never created a
+  `ClickHouseMetricsStore` and passed `newServer(*listenAddr, nil)`, so the production binary
+  silently ACKed every `Export` without storing anything. Add `-clickhouseAddr` /
+  `-clickhouseDatabase` / `-clickhouseUsername` / `-clickhousePassword` flags, connect, call
+  `CreateTables`, pass the real store into `newServer`, fail fast on connect/create error.
+  Pure wiring — no new logic, exempt from the unit-test requirement (already covered by the
+  integration suite's use of `NewClickHouseMetricsStore`). (`server.go`)
+  - Spec: none (pre-existing defect, not an AC of this feature)
+  - Review: —
+- [x] [small] **10. Retryable gRPC status codes for transient store errors** — pre-existing gap
+  surfaced by code review: the Export handler returned raw ClickHouse errors, which surface as
+  gRPC code `Unknown` — non-retryable per the OTLP client retry contract, which the whole
+  `ReplacingMergeTree` / `ShouldEmit`/`MarkEmitted` design (AC-7) depends on the client actually
+  retrying. Wrap store-insert failures in `status.Error(codes.Unavailable, ...)`. Unit-test: the
+  wrapper produces `codes.Unavailable`; a gauge-insert failure through `Export` surfaces that code.
+  (`metrics_service.go`)
+  - Spec: AC-7 (retries only close the loop if the client is told to retry)
+  - Review: —
 
 ## Cut for scope (documented, not built)
 - Migration MV + its ClickHouse hash-parity expression (`4-migration.md` is a runbook, not code).

@@ -6,7 +6,17 @@ import (
 	"time"
 
 	colmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+// transientStoreError wraps a ClickHouse write failure as a retryable gRPC status. A plain
+// returned error surfaces as code Unknown, which OTLP clients treat as terminal — killing the
+// retry this feature's whole retry-safety design (ReplacingMergeTree, ShouldEmit/MarkEmitted,
+// AC-7) depends on. Unavailable tells a conforming client it's safe to retry the same batch.
+func transientStoreError(err error) error {
+	return status.Error(codes.Unavailable, err.Error())
+}
 
 type dash0MetricsServiceServer struct {
 	addr  string
@@ -63,7 +73,7 @@ func (m *dash0MetricsServiceServer) Export(ctx context.Context, request *colmetr
 		if err := m.store.InsertSeries(ctx, toEmit); err != nil {
 			slog.ErrorContext(ctx, "inserting series rows",
 				slog.String("error", err.Error()), slog.Int("series_count", len(toEmit)))
-			return nil, err
+			return nil, transientStoreError(err)
 		}
 		for _, s := range toEmit {
 			m.cache.MarkEmitted(s.SeriesId, now)
@@ -76,14 +86,14 @@ func (m *dash0MetricsServiceServer) Export(ctx context.Context, request *colmetr
 		if err := m.store.InsertGauge(ctx, gaugeRows); err != nil {
 			slog.ErrorContext(ctx, "inserting gauge rows",
 				slog.String("error", err.Error()), slog.Int("count", len(gaugeRows)))
-			return nil, err
+			return nil, transientStoreError(err)
 		}
 	}
 	if len(sumRows) > 0 {
 		if err := m.store.InsertSum(ctx, sumRows); err != nil {
 			slog.ErrorContext(ctx, "inserting sum rows",
 				slog.String("error", err.Error()), slog.Int("count", len(sumRows)))
-			return nil, err
+			return nil, transientStoreError(err)
 		}
 	}
 

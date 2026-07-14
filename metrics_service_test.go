@@ -10,6 +10,8 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // fakeMetricsStore is an in-process MetricsStore fake for exercising the Export handler's
@@ -17,6 +19,8 @@ import (
 // this flow ships in task 7's read-path integration suite.
 type fakeMetricsStore struct {
 	insertSeriesErr error
+	insertGaugeErr  error
+	insertSumErr    error
 
 	callOrder   []string
 	seriesCalls [][]SeriesRow
@@ -37,12 +41,18 @@ func (f *fakeMetricsStore) InsertSeries(_ context.Context, rows []SeriesRow) err
 
 func (f *fakeMetricsStore) InsertGauge(_ context.Context, rows []GaugeRow) error {
 	f.callOrder = append(f.callOrder, "gauge")
+	if f.insertGaugeErr != nil {
+		return f.insertGaugeErr
+	}
 	f.gaugeCalls = append(f.gaugeCalls, append([]GaugeRow(nil), rows...))
 	return nil
 }
 
 func (f *fakeMetricsStore) InsertSum(_ context.Context, rows []SumRow) error {
 	f.callOrder = append(f.callOrder, "sum")
+	if f.insertSumErr != nil {
+		return f.insertSumErr
+	}
 	f.sumCalls = append(f.sumCalls, append([]SumRow(nil), rows...))
 	return nil
 }
@@ -123,13 +133,43 @@ func TestExport_RepeatedSeriesDedupedAcrossCalls(t *testing.T) {
 	}
 }
 
+func TestTransientStoreError_ReturnsUnavailableStatus(t *testing.T) {
+	err := transientStoreError(errors.New("boom"))
+
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("expected a gRPC status error, got %v", err)
+	}
+	if st.Code() != codes.Unavailable {
+		t.Errorf("expected codes.Unavailable (retryable), got %v", st.Code())
+	}
+}
+
+func TestExport_StoreInsertFailureSurfacesAsRetryableGRPCStatus(t *testing.T) {
+	fake := &fakeMetricsStore{insertGaugeErr: errors.New("insert gauge failed")}
+	srv := newTestServer(fake)
+
+	_, err := srv.Export(context.Background(), gaugeExportRequest())
+	if err == nil {
+		t.Fatalf("expected Export to surface the InsertGauge error")
+	}
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.Unavailable {
+		t.Fatalf("expected a retryable codes.Unavailable status, got %v (status ok=%v)", err, ok)
+	}
+}
+
 func TestExport_FailedSeriesInsertBlocksDatapointsAndDoesNotSuppressRetry(t *testing.T) {
 	fake := &fakeMetricsStore{insertSeriesErr: errors.New("insert series failed")}
 	srv := newTestServer(fake)
 	req := gaugeExportRequest()
 
-	if _, err := srv.Export(context.Background(), req); err == nil {
+	_, err := srv.Export(context.Background(), req)
+	if err == nil {
 		t.Fatalf("expected Export to surface the InsertSeries error")
+	}
+	if st, ok := status.FromError(err); !ok || st.Code() != codes.Unavailable {
+		t.Errorf("expected a retryable codes.Unavailable status, got %v (status ok=%v)", err, ok)
 	}
 	if len(fake.gaugeCalls) != 0 {
 		t.Fatalf("expected series-first ordering to skip datapoint insert after a series insert failure, got %d gauge inserts", len(fake.gaugeCalls))

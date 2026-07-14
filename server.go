@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"log/slog"
 	"net"
@@ -20,6 +21,10 @@ import (
 var (
 	listenAddr            = flag.String("listenAddr", "localhost:4317", "The listen address")
 	maxReceiveMessageSize = flag.Int("maxReceiveMessageSize", 16777216, "The max message size in bytes the server can receive")
+	clickhouseAddr        = flag.String("clickhouseAddr", "localhost:9000", "The ClickHouse native-protocol address")
+	clickhouseDatabase    = flag.String("clickhouseDatabase", "default", "The ClickHouse database")
+	clickhouseUsername    = flag.String("clickhouseUsername", "default", "The ClickHouse username")
+	clickhousePassword    = flag.String("clickhousePassword", "", "The ClickHouse password")
 )
 
 const name = "dash0.com/otlp-log-processor-backend"
@@ -79,6 +84,20 @@ func run() (err error) {
 
 	flag.Parse()
 
+	ctx := context.Background()
+	slog.Debug("Connecting to ClickHouse", slog.String("addr", *clickhouseAddr), slog.String("database", *clickhouseDatabase))
+	store, err := NewClickHouseMetricsStore(ctx, *clickhouseAddr, *clickhouseDatabase, *clickhouseUsername, *clickhousePassword)
+	if err != nil {
+		return fmt.Errorf("connecting to clickhouse: %w", err)
+	}
+	defer func() {
+		err = errors.Join(err, store.Close())
+	}()
+
+	if err := store.CreateTables(ctx); err != nil {
+		return fmt.Errorf("creating clickhouse tables: %w", err)
+	}
+
 	slog.Debug("Starting listener", slog.String("listenAddr", *listenAddr))
 	listener, err := net.Listen("tcp", *listenAddr)
 	if err != nil {
@@ -90,7 +109,7 @@ func run() (err error) {
 		grpc.MaxRecvMsgSize(*maxReceiveMessageSize),
 		grpc.Creds(insecure.NewCredentials()),
 	)
-	colmetricspb.RegisterMetricsServiceServer(grpcServer, newServer(*listenAddr, nil))
+	colmetricspb.RegisterMetricsServiceServer(grpcServer, newServer(*listenAddr, store))
 
 	slog.Debug("Starting gRPC server")
 
