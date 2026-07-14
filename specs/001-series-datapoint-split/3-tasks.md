@@ -37,7 +37,7 @@
   bounds size; concurrent access safe. (`series_cache.go`)
   - Spec: design §Series dedup cache, AC-2 AC-5, C-3, C-4
   - Review: —
-- [ ] [medium] **4. Store: skinny rows + InsertSeries** — make `GaugeRow`/`SumRow` skinny (SeriesId +
+- [x] [medium] **4. Store: skinny rows + InsertSeries** — make `GaugeRow`/`SumRow` skinny (SeriesId +
   timestamps + value), add `InsertSeries` to `MetricsStore`, keep `InsertGauge`/`InsertSum`. Batch
   inserts with `async_insert = 1` **and `wait_for_async_insert = 1`** (durable ack; stops reads racing
   the flush). Update `MapGaugeRows`/`MapSumRows` to emit skinny rows + `SeriesRow`, setting
