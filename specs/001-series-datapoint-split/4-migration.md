@@ -11,32 +11,48 @@ N/A — just create the new schema forward-only (task 1). Assumes the 001 code (
 A ClickHouse **Materialized View bridges the old write path**: old apps keep inserting fat rows
 unchanged; an MV mirrors each new insert into the new tables; a one-time backfill covers history;
 the new app writes the new tables directly. Two representations stay in sync at the *system* level
-without any app writing to both schemas. Blue-green cutover via the load balancer; overlap is safe
-because all writes are idempotent into the same new tables (`AggregatingMergeTree` on `otel_series`,
-append on skinny datapoints).
+without any app writing to both schemas. Blue-green cutover via the load balancer.
+
+Overlap is safe because **both new tables collapse duplicates by sorting key** —
+`AggregatingMergeTree` on `otel_series`, and `ReplacingMergeTree ORDER BY (SeriesId, TimeUnix)` on
+the datapoint tables. This is what makes the old path (via MV) and the new path (direct) able to write
+the same rows concurrently without double-counting, and it is why the backfill/MV boundary below is a
+non-issue rather than a hazard.
 
 > Why no in-app dual-write: the MV substitutes for it on the old path, direct writes cover the new
 > path, and LB coexistence covers the transition window.
 
+## ⚠️ Precondition that will silently corrupt the migration if missed
+The bridge MV must recompute `SeriesId` **in ClickHouse SQL** from the wide row, and it must agree
+**byte-for-byte** with the Go implementation — same field order, same `\x1f` separator, same sorted
+map-key serialisation, `xxHash64` seed 0 (see design §SeriesId canonical encoding). If the two
+diverge, the old path and new path mint **different ids for the same series**: identities and
+datapoints split in half, and the Step-4 row-count parity check **will still pass**, because the row
+counts are right — only the ids are wrong. Run the Go↔ClickHouse hash-parity fixture test (task 2)
+against the exact MV expression before attaching it.
+
 ## Preconditions
 - 001 shipped: new-app image writes `otel_series` + skinny `_datapoints` tables via app-side dedup.
 - New tables created (`otel_series`, `otel_metrics_gauge_datapoints`, `otel_metrics_sum_datapoints`).
-- A chosen cutover timestamp `T` for backfill boundary (see Step 3 dedup note).
+- Hash-parity verified (above).
 
 ## Steps
 1. **Create new tables.** `otel_series` + skinny `_datapoints` tables. No traffic yet; harmless if empty.
-2. **Attach bridge MVs** on the existing wide tables → derive `otel_series` rows (dedup key) and
-   skinny datapoint rows from every *new* fat insert. Old apps remain untouched and keep serving.
-3. **Backfill history.** One-time `INSERT INTO <new> SELECT … FROM <wide> WHERE TimeUnix < T`.
-   The MV only catches inserts *after* its creation, so history must be backfilled explicitly.
-   **Boundary dedup**: bound the backfill by `T` (and/or use a temporary `ReplacingMergeTree` on
-   the skinny tables during the window) so a row near the boundary isn't inserted by both backfill
-   and MV — skinny tables are append `MergeTree` and won't self-dedup.
-4. **Verify parity.** Compare row counts / spot-check values between wide and new tables over an
-   overlapping window before shifting any traffic.
-5. **Deploy the new app** (writes new tables directly). Now both paths populate the new tables:
+2. **Attach bridge MVs** on the existing wide tables → derive `otel_series` rows and skinny datapoint
+   rows from every *new* fat insert, computing `SeriesId` with the canonical SQL expression. Old apps
+   remain untouched and keep serving.
+3. **Backfill history.** One-time `INSERT INTO <new> SELECT … FROM <wide>`. The MV only fires on
+   inserts made *after* its creation, so pre-existing history must be backfilled explicitly.
+   Overlap with the MV at the boundary — and any late-arriving row the MV also writes — is **harmless**:
+   a repeated `(SeriesId, TimeUnix)` collapses under `ReplacingMergeTree`. No cutover timestamp, no
+   engine juggling. (An earlier draft proposed "temporarily switch the datapoint tables to
+   ReplacingMergeTree" — that is not a real operation; a table's engine cannot be swapped in place.
+   Adopting `ReplacingMergeTree` permanently, per the design, removes the need.)
+4. **Verify parity.** Compare row counts **and spot-check `SeriesId` values** between the MV-derived
+   rows and ids computed by the new app for the same series. Counts alone do not detect hash divergence.
+5. **Deploy the new app** (writes new tables directly). Both paths now populate the new tables:
    old-app traffic via the MV, new-app traffic direct.
-6. **LB cutover.** Shift traffic old→new gradually (canary → full). Overlap is safe (idempotent).
+6. **LB cutover.** Shift traffic old→new gradually (canary → full). Overlap is safe (duplicates collapse).
 7. **Retire.** Drain and stop old apps → drop the bridge MVs → drop or TTL-expire the wide tables.
 
 ## Rollback
@@ -47,14 +63,16 @@ append on skinny datapoints).
 - Step 7 is the point of no return — only after parity and full cutover are confirmed.
 
 ## Risks
-- **Boundary double-insert** on skinny datapoints — mitigated by the `T` bound / temporary
-  `ReplacingMergeTree` in Step 3.
-- **MV insert-cost on the old path** during the window — the series MV amplifies unless it
-  `GROUP BY SeriesId` per block; acceptable for a bounded migration window.
+- **Go/ClickHouse hash divergence** — the one failure that survives a parity check. Mitigated by the
+  fixture test and the Step-4 id spot-check above.
+- **MV insert-cost on the old path** during the window — the series MV amplifies (one row per
+  datapoint) unless it `GROUP BY SeriesId` per block; acceptable for a bounded migration window.
 - **Backfill load** — large `INSERT … SELECT` competes with live ingest; run off-peak or chunk by
   time partition.
+- **Pre-merge duplicates** — until `ReplacingMergeTree` merges, a read may see a datapoint twice;
+  the canonical query's `LIMIT 1 BY (SeriesId, TimeUnix)` absorbs this.
 
 ## Verification
-Parity check (Step 4) passes; after cutover, the 001 canonical two-step query returns the same
-datapoints the legacy wide-table query did for an overlapping window; `otel_series` holds one row
-per series; wide tables retired with no data loss.
+Hash parity confirmed before Step 2. Parity check (Step 4) passes on both counts and ids. After
+cutover, `MetricsQuerier.QueryDatapoints` returns the same datapoints the legacy wide-table query did
+for an overlapping window; `otel_series` holds one row per series; wide tables retired with no data loss.

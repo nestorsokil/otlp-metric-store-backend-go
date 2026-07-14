@@ -30,7 +30,9 @@ and never require a full table scan.
 | 003 | series-cache-warmup | Pre-populate the dedup cache from ClickHouse on startup to avoid the restart re-insert burst | 001 | planned |
 | 004 | metrics-self-observability | Export the app's own OTel metrics via OTLP back into its own ingest path, self-stored + queryable via MetricsQuerier | 001 | planned |
 
-Status: `planned` → `specced` (spec set approved) → `implemented` (all tasks shipped).
+Status: `planned` → `specced` → `implemented`. These track the *feature* here; the spec files inside
+each feature carry their own doc-level status (`draft` → `approved` → `implemented`). A roadmap row
+is `specced` exactly when that feature's spec docs reach `approved`.
 
 ## Sequencing notes
 - **001 is the foundation** — it establishes the SeriesId hash, the shared series table, the
