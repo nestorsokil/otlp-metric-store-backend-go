@@ -11,7 +11,7 @@
 
 ## Tasks
 
-- [ ] [medium] **1. Schema: series + skinny datapoint tables** — replace the 5 wide-table DDLs with
+- [x] [medium] **1. Schema: series + skinny datapoint tables** — replace the 5 wide-table DDLs with
   `createSeriesTableSQL` (`otel_series`, **`ReplacingMergeTree(LastSeen)`**, plain columns, bloom
   indexes on resource/datapoint attribute maps, **no TTL**) and
   `createGaugeTableSQL`/`createSumTableSQL` creating `otel_datapoints_gauge` /

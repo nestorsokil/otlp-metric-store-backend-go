@@ -73,14 +73,12 @@ func NewClickHouseMetricsStore(ctx context.Context, addr string, database string
 	return &ClickHouseMetricsStore{conn: conn}, nil
 }
 
-// CreateTables executes DDL for all 5 metric tables.
+// CreateTables executes DDL for the series lookup table and the skinny datapoint tables.
 func (s *ClickHouseMetricsStore) CreateTables(ctx context.Context) error {
 	ddls := []string{
+		createSeriesTableSQL,
 		createGaugeTableSQL,
 		createSumTableSQL,
-		createHistogramTableSQL,
-		createExponentialHistogramTableSQL,
-		createSummaryTableSQL,
 	}
 	for _, ddl := range ddls {
 		if err := s.conn.Exec(ctx, ddl); err != nil {
