@@ -76,7 +76,7 @@
   wide-column assertions. (`integration_test.go`, `server_test.go`)
   - Spec: AC-1 AC-2 AC-3 AC-6 AC-7, C-2
   - Review: —
-- [ ] [small] **8. README** — document the split, series-vs-datapoint terminology, the SeriesId
+- [x] [small] **8. README** — document the split, series-vs-datapoint terminology, the SeriesId
   reference + canonical encoding, the no-full-scan query pattern, the `MetricsQuerier` interface, and
   throughput choices (dedup cache, async_insert). Note what is deliberately out of scope (other metric
   types, migration, retention). Move the assignment brief to `ASSIGNMENT.md`, write a new `README.md`.

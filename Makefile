@@ -6,13 +6,13 @@ build:
 	go build ./...
 
 run:
-	go run .
+	LOG_LEVEL=debug go run .
 
 test:
-	go test -count=1 ./...
+	LOG_LEVEL=debug go test -count=1 ./...
 
 test-integration:
-	go test -tags integration -count=1 -v ./...
+	LOG_LEVEL=debug go test -tags integration -count=1 -v ./...
 
 test-all: test test-integration
 

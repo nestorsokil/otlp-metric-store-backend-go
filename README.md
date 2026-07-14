@@ -1,63 +1,61 @@
 # OTLP Metric Storage (Go)
 
-## Introduction
-This take-home assignment is designed to give you an opportunity to demonstrate your skills and experience in
-building a small backend application. We expect you to spend 3-4 hours on this assignment (using AI coding agents).
-If you find yourself spending more time than that, please stop and submit what you have. We are not looking for a
-complete solution, but rather a demonstration of your skills and experience.
+A gRPC service that receives OTLP metrics (Gauge and Sum) and stores them in ClickHouse, split
+into a **series lookup table** (`otel_series`) plus **skinny datapoint tables**
+(`otel_datapoints_gauge`/`otel_datapoints_sum`), so a series' identity is stored once and its
+datapoints stay minimal. Built for high-throughput ingest where the same series recurs across
+millions of datapoints.
 
-To submit your solution, please create a public GitHub repository and send us the link. Please include a `README.md` file
-with instructions on how to run your application.
-
-## Overview
-The goal of this assignment is to build a simple backend application that receives [metric datapoints](https://opentelemetry.io/docs/concepts/signals/metrics/)
-on a gRPC endpoint and processes them, before storing in ClickHouse.
-Current state is that we have a gRPC endpoint for receiving metrics, and Gauge and Sum type get correctly converted to
-records and inserted into ClickHouse. This is tested with both unit- and integration-tests.
-
-What we're looking for is to extract meta-data about the metrics into a separate table, which will then act as a 'lookup'
-table, and that actual data-points just get stored as value + timestamp and with a reference to the lookup table.
-
-Think about and keep in mind the following things:
-- How to do the reference between tables?
-- How to efficiently store the meta-data in ClickHouse?
-- All data should be stored in such a way that full table scans are never needed, under the assumption data always gets queried for a specific time-frame
-- Other than time-frame, there are no other mandatory filters for querying
-- While you can assume cardinality of the metrics is 'low', e.g. Resources (Attributes) are likely to change over time 
-
-Your solution should take into account high throughput, both in number of messages and the number of metrics / data-points per message.
-
-Feel free to use the existing scaffoling in this folder. Of course, you can also change anything else as you see fit.
-
-## Technology Constraints
-- Your Go program should compile using standard Go SDK, and be compatible with Go 1.26.
-- Use any additional libraries you want and need.
-
-## Notes
-- As this assignment is for the role of a Staff / Senior Product Engineer, we expect you to pay some attention to maintainability and operability of the solution. For example:
-  - Consistent terminology usage
-  - Validation of the behaviour
-  - Include signals / events to help in debugging
-- Assume that this application will be deployed to production. Build it accordingly.
+The original task definition is preserved in [ASSIGNMENT.md](ASSIGNMENT.md).
 
 ## Usage
 
-Build the application:
+Requires a reachable ClickHouse instance (native protocol, default `localhost:9000`), configured
+via flags (`-clickhouseAddr`, `-clickhouseDatabase`, `-clickhouseUsername`, `-clickhousePassword`).
+
 ```shell
-go build ./...
+make build            # go build ./...
+make run              # go run .
+make test             # unit tests
+make test-integration # integration tests against a real ClickHouse (testcontainers + Docker)
+make test-all
 ```
 
-Run the application:
+Integration tests debug logs by default `Export` detail (datapoint counts, series emitted vs. deduped):
+
 ```shell
-go run ./...
+LOG_LEVEL=debug go test -tags integration -v .
 ```
 
-Run tests
-```shell
-go test ./...
-```
+## Design
+
+Full reasoning — requirements, design (schema, canonical query, alternatives considered),
+task breakdown — lives in [specs/001-series-datapoint-split/](specs/001-series-datapoint-split/).
+This section captures only the decisions worth knowing up front:
+
+- **SeriesId** is a deterministic `xxHash64` (seed 0) over a **length-prefixed** encoding of the
+  series identity — not delimiter-separated, since attribute keys/values are arbitrary
+  user-controlled UTF-8 and a naive `k=v,k=v` join collides deterministically when a value
+  contains `,` or `=`. See `seriesID` in `metrics_mapper.go`.
+- **Write path** collapses same-series datapoints in a batch to one candidate, gates each through
+  an in-process dedup cache (`series_cache.go`, `ShouldEmit`/`MarkEmitted` split so a failed
+  insert never suppresses the client's retry), and writes series-first with
+  `async_insert=1`+`wait_for_async_insert=1` — throughput without sacrificing a durable ack.
+- **Read path** (`MetricsQuerier.QueryDatapoints`, internal only — no network exposure) resolves
+  `SeriesId`s from `otel_series`, then range-scans datapoints by `SeriesId` + time. Partitioning by
+  day plus the primary key guarantees no full table scan; verified in the integration suite via
+  `EXPLAIN indexes = 1`.
+- **Out of scope**: Histogram/Exponential Histogram/Summary metric types, migration from the
+  legacy wide tables (runbook only, in `4-migration.md`), retention/TTL, and dedup-cache
+  warm-read on startup.
+
+[specs/roadmap.md](specs/roadmap.md) tracks these and other potential follow-ups as future
+features/specs.
 
 ## References
 
 - [OpenTelemetry Metrics](https://opentelemetry.io/docs/concepts/signals/metrics/)
 - [OpenTelemetry Protocol (OTLP)](https://github.com/open-telemetry/opentelemetry-proto)
+
+This feature was implemented using the [sdd](https://github.com/nestorsokil/sdd) Claude Code
+skill — a spec-driven development workflow (requirements → design → tasks, reviewed before code).
