@@ -29,7 +29,7 @@
   (`metrics_mapper.go`, `clickhouse_client.go`)
   - Spec: design §SeriesId canonical encoding, AC-2
   - Review: —
-- [ ] [medium] **3. Series dedup cache** — `series_cache.go` on `hashicorp/golang-lru/v2/expirable`.
+- [x] [medium] **3. Series dedup cache** — `series_cache.go` on `hashicorp/golang-lru/v2/expirable`.
   **`ShouldEmit(id, now) bool` decides only; `MarkEmitted(id, now)` records — never merged.** Config
   with pinned defaults (`refreshInterval=5m`, `maxEntries=100_000`, `idleTTL=1h`), env-overridable.
   Unit-test: first sight emits; re-sight before `MarkEmitted` still emits (a failed insert must not
