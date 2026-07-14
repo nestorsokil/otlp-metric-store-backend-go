@@ -53,6 +53,27 @@ Reads resolve SeriesIds from the small series table, then range-scan datapoints 
   `InsertSum(ctx, []SumRow)` (GaugeRow/SumRow now skinny, identical shape).
 - **Dependencies**: ClickHouse driver. `async_insert` enabled for datapoint inserts (throughput).
 
+### MetricsQuerier (`metrics_query.go`, new)
+- **Responsibility**: encapsulate the two-step read (resolve SeriesIds from `otel_series FINAL` by
+  service/attributes/time-overlap → range-scan the datapoint table by SeriesId + time) so callers
+  pass a typed filter, not SQL. This is the read-side analog of `MetricsStore`; the same concrete
+  `ClickHouseMetricsStore` implements it. Not exposed over the network (NG-1) — it backs the
+  integration test now and any future query endpoint.
+- **Interface**:
+  ```go
+  type DatapointQuery struct {
+      MetricType  string            // "gauge" | "sum" — selects the datapoint table
+      ServiceName string
+      Attributes  map[string]string // optional exact-match series filters
+      From, To    time.Time         // required time-frame (C-2)
+  }
+  type Datapoint struct { SeriesId uint64; TimeUnix time.Time; Value float64 }
+
+  QueryDatapoints(ctx context.Context, q DatapointQuery) ([]Datapoint, error)
+  ```
+- **Dependencies**: ClickHouse driver. Runs exactly the canonical query below; `MetricType` maps to
+  the datapoint table name, `Attributes` add `AND Attributes[k] = v` clauses to the series subquery.
+
 ### Export handler (`metrics_service.go`)
 - **Responsibility**: map request → SeriesIds; emit series rows (gated by cache, series-first) then
   datapoints. Wiring only.
@@ -142,8 +163,10 @@ SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
 
 (Histogram/Exp-Histogram/Summary tables are out of scope per NG-2 — future features.)
 
-Canonical read query (documented in README, exercised by test) — the series subquery prunes by the
-activity window so the datapoint scan only touches series live during `[from, to]`:
+Canonical read query — the single query `MetricsQuerier.QueryDatapoints` builds and runs (documented
+in README, exercised by the integration test through the interface, never as raw SQL in the test).
+The series subquery prunes by the activity window so the datapoint scan only touches series live
+during `[from, to]`:
 
 ```sql
 SELECT dp.TimeUnix, dp.Value

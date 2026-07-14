@@ -8,7 +8,7 @@
 
 ## Tasks
 
-### Walking skeleton (chunks 1+2: write split, proven by read) — the 4h core
+### Walking skeleton (chunks 1+2: write split, proven by read)
 - [ ] [medium] **1. Schema: series + skinny datapoint tables** — replace the 5 wide-table DDLs
   with `createSeriesTableSQL` (`otel_series`, AggregatingMergeTree with min FirstSeen / max LastSeen,
   series-level constants as columns,
@@ -39,20 +39,30 @@
   (`metrics_service.go`, `otel.go`)
   - Spec: design §Export handler §Metrics, AC-1 AC-5
   - Review: —
-- [ ] [medium] **6. Read-path e2e integration test** — rewrite integration suite for the new
-  schema: send Gauge+Sum via gRPC, then assert retrieval via the two-step join query (joining
-  `otel_series` to `otel_metrics_gauge_datapoints`) filtered by `ServiceName` + time-frame; assert
-  `otel_series` has one row per series after repeated datapoints (AC-2). Replace the old
-  `otel_metrics_gauge`/`_sum` wide-column assertions. (`integration_test.go`, `server_test.go`)
-  - Spec: AC-1 AC-2 AC-3, C-2
+- [ ] [medium] **6. Query interface** — add `MetricsQuerier` with `DatapointQuery`/`Datapoint` types
+  and `QueryDatapoints`, implemented on `ClickHouseMetricsStore`. It builds and runs the canonical
+  two-step `FINAL` join (MetricType → datapoint table; optional `Attributes` → `Attributes[k]=v`
+  clauses on the series subquery). Integration-test it directly: insert → query by service + time,
+  assert typed results; assert the activity-window prune excludes out-of-window series.
+  (`metrics_query.go`, `clickhouse_client.go`)
+  - Spec: design §MetricsQuerier, AC-3 AC-6, C-2
   - Review: —
-- [ ] [small] **7. README: schema rationale + canonical query** — document the split, the series
-  vs datapoint terminology (glossary), the SeriesId reference, the no-full-scan query pattern, and
-  throughput choices (dedup cache, async_insert). Move the existing README.md to README_original.md and create a new `README.md` with the above content. (`README.md`)
-  - Spec: AC-3, NG-1
+- [ ] [medium] **7. Read-path e2e integration test** — rewrite the integration suite for the new
+  schema: send Gauge+Sum via gRPC, then assert retrieval **through `MetricsQuerier.QueryDatapoints`**
+  (no raw SQL in the test) filtered by `ServiceName` + time-frame; assert `otel_series` has one row
+  per series (`FINAL`) after repeated datapoints (AC-2). Replace the old `otel_metrics_gauge`/`_sum`
+  wide-column assertions. (`integration_test.go`, `server_test.go`)
+  - Spec: AC-1 AC-2 AC-3 AC-6, C-2
+  - Review: —
+- [ ] [small] **8. README: schema rationale + canonical query** — document the split, the series
+  vs datapoint terminology (glossary), the SeriesId reference, the no-full-scan query pattern, the
+  `MetricsQuerier` interface, and throughput choices (dedup cache, async_insert). Move the existing
+  README.md to README_original.md and create a new `README.md` with the above content. (`README.md`)
+  - Spec: AC-3 AC-6, NG-1
   - Review: —
 
 ## Verification
 `go build ./...` clean. `go test ./...` (unit) green. `go test -tags integration ./...`:
-send Gauge+Sum over gRPC → the two-step time-bounded join returns the datapoints, and `otel_series`
-holds exactly one active row per series after repeated ingest. README documents the query.
+send Gauge+Sum over gRPC → `MetricsQuerier.QueryDatapoints` returns the datapoints for a service +
+time-frame (no raw SQL in the test), and `otel_series` holds exactly one active row per series
+(`FINAL`) after repeated ingest. README documents the query and the interface.

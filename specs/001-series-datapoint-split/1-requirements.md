@@ -22,6 +22,10 @@ ingest where the same series recurs across millions of datapoints.
   description, unit), when stored, then they live on the series row, not repeated per datapoint.
 - **AC-5** Given a cold start (empty dedup cache), when ingest resumes, then correctness holds
   (no lost/duplicated series) — at most a transient burst of idempotent series re-inserts.
+- **AC-6** Given a stored series, when queried through the `MetricsQuerier` interface with a typed
+  filter (service name, optional attributes, required time-frame), then it returns the matching
+  datapoints — the two-step join + `FINAL` is encapsulated behind the interface, so callers (and
+  tests) never write SQL.
 
 ## Constraints
 - **C-1** Compiles with standard Go SDK, compatible with Go 1.26.
@@ -35,8 +39,9 @@ ingest where the same series recurs across millions of datapoints.
   must tolerate new series appearing and old ones going silent.
 
 ## Non-goals
-- **NG-1** No product query API (gRPC/HTTP read endpoint). Read is validated by test + documented
-  query pattern only.
+- **NG-1** No *external* query API (gRPC/HTTP read endpoint). An internal `MetricsQuerier` interface
+  provides programmatic reads (backing tests and any future endpoint), but nothing is exposed over
+  the network in this feature.
 - **NG-2** Only Gauge and Sum are in scope. Histogram, Exponential Histogram, and Summary ingestion
   are **deferred to separate future feature(s)** — no DDL, mappers, or tasks for them here. The
   shared series table and skinny-table pattern are designed to accommodate them later.
