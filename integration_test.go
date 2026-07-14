@@ -420,6 +420,68 @@ func TestExport_RetriedBatchDoesNotDoubleCount(t *testing.T) {
 // TestQueryDatapoints_NoFullTableScan covers AC-3/C-2: a time-scoped query must prune by
 // partition rather than scanning every part. EXPLAIN indexes = 1 surfaces the planner's Partition
 // key evidence for toDate(TimeUnix).
+
+// TODO Claude Fable 5 post-implementation review raised some concerns about the plan below:
+//   - The PrimaryKey section lists only TimeUnix (second key column, weak "generic exclusion
+//     search"); there is no static SeriesId condition, so filtered queries prune granules via
+//     the runtime join filter (BuildRuntimeFilter on SeriesId) rather than index analysis.
+//   - That runtime filter culls rows at scan time, but EXPLAIN cannot show whether it skips
+//     granules/IO, and it is a version-dependent default (present in 26.2) with a bounded
+//     build-side capacity — the plan alone doesn't prove no-full-scan for filtered queries.
+//   - This test's dataset (3 rows, 1 granule/day) proves partition pruning only; a stronger
+//     assertion is system.query_log read_rows << table rows at realistic volume. If the
+//     runtime filter proves insufficient there, add an explicit
+//     "AND dp.SeriesId IN (SELECT SeriesId FROM otel_series WHERE ...)" to restore static
+//     primary-key pruning.
+//   - Series subquery shows "Condition: true": MetricType can't use ORDER BY
+//     (ServiceName, MetricName, SeriesId), so otel_series is fully scanned — accepted while
+//     the series table stays small (low-cardinality assumption, C-5).
+//
+// Expression (Project names)
+//	Limit
+//	  LimitBy
+//	    Expression (Before LIMIT BY)
+//	      Sorting (Sorting for ORDER BY)
+//	        Expression
+//	          Join (JOIN FillRightFirst)
+//	            Expression (Left Pre Join Actions)
+//	              Expression
+//	                ReadFromMergeTree (default.otel_datapoints_gauge)
+//	                Indexes:
+//	                  MinMax
+//	                    Keys:
+//	                      TimeUnix
+//	                    Condition: and((TimeUnix in (-Inf, '1784073600']), (TimeUnix in ['1783987200', +Inf)))
+//	                    Parts: 1/3
+//	                    Granules: 1/3
+//	                  Partition
+//	                    Keys:
+//	                      toDate(TimeUnix)
+//	                    Condition: and((toDate(TimeUnix) in (-Inf, 20649]), (toDate(TimeUnix) in [20648, +Inf)))
+//	                    Parts: 1/1
+//	                    Granules: 1/1
+//	                  PrimaryKey
+//	                    Keys:
+//	                      TimeUnix
+//	                    Condition: and((TimeUnix in (-Inf, '1784073600']), (TimeUnix in ['1783987200', +Inf)))
+//	                    Parts: 1/1
+//	                    Granules: 1/1
+//	                    Search Algorithm: generic exclusion search
+//	                  Ranges: 1
+//	            Expression (Right Pre Join Actions)
+//	              BuildRuntimeFilter (Build runtime join filter on __table2.SeriesId)
+//	                Expression ((Change column names to column identifiers + Project names))
+//	                  Distinct (DISTINCT)
+//	                    Distinct (Preliminary DISTINCT)
+//	                      Expression (Projection)
+//	                        Expression ((WHERE + Change column names to column identifiers))
+//	                          ReadFromMergeTree (default.otel_series)
+//	                          Indexes:
+//	                            PrimaryKey
+//	                              Condition: true
+//	                              Parts: 1/1
+//	                              Granules: 1/1
+//	                            Ranges: 1
 func TestQueryDatapoints_NoFullTableScan(t *testing.T) {
 	store, cleanup := setupClickHouse(t)
 	defer cleanup()
@@ -464,6 +526,7 @@ func TestQueryDatapoints_NoFullTableScan(t *testing.T) {
 	}
 
 	planText := plan.String()
+	t.Logf("EXPLAIN indexes = 1 plan:\n%s", planText)
 	if !strings.Contains(planText, "Partition") || !strings.Contains(planText, "TimeUnix") {
 		t.Errorf("expected EXPLAIN plan to show partition pruning on TimeUnix (PARTITION BY toDate(TimeUnix)), got:\n%s", planText)
 	}
