@@ -25,9 +25,10 @@ and never require a full table scan.
 
 | NNN | Feature | Purpose | Depends on | Status |
 |-----|---------|---------|------------|--------|
-| 001 | series-datapoint-split | Split Gauge+Sum storage into a shared series table + skinny datapoint tables, proven end-to-end | — | planned |
+| 001 | series-datapoint-split | Split Gauge+Sum storage into a shared series table + skinny datapoint tables, proven end-to-end | — | specced |
 | 002 | other-metric-types | Extend the split to Histogram, Exponential Histogram, Summary | 001 | planned |
 | 003 | series-cache-warmup | Pre-populate the dedup cache from ClickHouse on startup to avoid the restart re-insert burst | 001 | planned |
+| 004 | metrics-self-observability | Export the app's own OTel metrics via OTLP back into its own ingest path, self-stored + queryable via MetricsQuerier | 001 | planned |
 
 Status: `planned` → `specced` (spec set approved) → `implemented` (all tasks shipped).
 
@@ -35,8 +36,9 @@ Status: `planned` → `specced` (spec set approved) → `implemented` (all tasks
 - **001 is the foundation** — it establishes the SeriesId hash, the shared series table, the
   dedup cache, and the skinny-table + two-step read pattern. Everything else builds on it.
 - **MVP boundary**: 001 alone is a shippable slice (Gauge+Sum, the two most common types).
-- 002 and 003 depend only on 001 and are independent of each other. 002 is user-facing coverage
-  (more metric types); 003 is an operability optimization (startup burst reduction).
+- 002, 003, 004 depend only on 001 and are independent of each other. 002 is user-facing coverage
+  (more metric types); 003 is an operability optimization (startup burst reduction); 004 is
+  self-observability (dogfood the app's own metrics through its ingest path).
 - The 001 → existing-deployment migration runbook lives inside 001 itself
   (`001-series-datapoint-split/4-migration.md`), not as its own feature — it's the rollout plan for
   001, only relevant on a brownfield (existing wide-table) deployment.
@@ -54,3 +56,12 @@ Status: `planned` → `specced` (spec set approved) → `implemented` (all tasks
 - Scope sketch: on startup, `SELECT SeriesId, LastSeen FROM otel_series` to seed the dedup
   cache, avoiding a burst of idempotent series re-inserts after a restart.
 - Notable: only worth building if the restart burst is observed to matter at real cardinality.
+
+### 004 — metrics-self-observability
+- Scope sketch: add an OTLP metric exporter on the app's `MeterProvider` (`otel.go`) targeting its
+  own gRPC ingest endpoint (keep stdout for debug). The app's own metrics then self-store in
+  `otel_series` + datapoints and are queryable via `MetricsQuerier`, tagged
+  `service.name = otlp-metrics-processor-backend` so they're filterable from real ingest.
+- Caveats to design for: **self-referential loop** (exporting metrics is itself an `Export` →
+  bounded/steady since export cadence is fixed, not volume-driven); **startup ordering** (start the
+  self-exporter after ingest + ClickHouse are ready; early exports retry/drop).
