@@ -25,7 +25,7 @@ and never require a full table scan.
 
 | NNN | Feature | Purpose | Depends on | Status |
 |-----|---------|---------|------------|--------|
-| 001 | series-datapoint-split | Split Gauge+Sum storage into a shared series table + skinny datapoint tables, proven end-to-end | — | specced |
+| 001 | series-datapoint-split | Split Gauge+Sum storage into a shared series table + skinny datapoint tables, proven end-to-end | — | planned |
 | 002 | other-metric-types | Extend the split to Histogram, Exponential Histogram, Summary | 001 | planned |
 | 003 | series-cache-warmup | Pre-populate the dedup cache from ClickHouse on startup to avoid the restart re-insert burst | 001 | planned |
 | 004 | metrics-self-observability | Export the app's own OTel metrics via OTLP back into its own ingest path, self-stored + queryable via MetricsQuerier | 001 | planned |

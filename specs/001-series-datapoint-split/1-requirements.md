@@ -14,7 +14,9 @@ ingest where the same series recurs across millions of datapoints.
   datapoint is stored in a skinny datapoint table referencing a `SeriesId`, and the series identity
   is stored once in the shared series lookup table.
 - **AC-2** Given the same series appearing in many datapoints/batches, when ingested, then the
-  series table holds exactly one active row per series (deduped), not one per datapoint.
+  series table holds exactly one **logical** row per series (deduped), not one per datapoint.
+  "Logical" because `ReplacingMergeTree` dedups lazily — unmerged rows may briefly coexist, so the
+  assertion is made against the merged state (`FROM otel_series FINAL`, or `count(DISTINCT SeriesId)`).
 - **AC-3** Given a stored series, when queried with a time-frame (and any optional filters), then its
   datapoints are retrievable via a two-step join (resolve SeriesId from the series table →
   range-scan datapoints) **without a full table scan** — demonstrated by asserting partition +
