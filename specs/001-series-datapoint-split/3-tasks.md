@@ -20,7 +20,7 @@
   (`clickhouse_schema.go`, `clickhouse_client.go`)
   - Spec: design §Schema, AC-1 AC-4 AC-7, C-2
   - Review: —
-- [ ] [medium] **2. SeriesId hasher + row types** — implement `seriesID(...)` to the **normative
+- [x] [medium] **2. SeriesId hasher + row types** — implement `seriesID(...)` to the **normative
   length-prefixed encoding** (design §SeriesId canonical encoding): `lp(s) = len(s) ":" s` (byte
   length), maps as `lp(concat of lp(k)+lp(v) over bytewise-sorted keys)`, exact field order,
   `xxHash64` seed 0. Define `SeriesRow` + skinny `GaugeRow`/`SumRow`. Unit-test: same identity → same

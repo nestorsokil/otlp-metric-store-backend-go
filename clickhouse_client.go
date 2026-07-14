@@ -36,6 +36,29 @@ type SumRow struct {
 	IsMonotonic            bool
 }
 
+// SeriesRow represents one series identity row for insertion into otel_series — the series-level
+// constants and dimension attributes, stored once per SeriesId rather than repeated per datapoint.
+type SeriesRow struct {
+	SeriesId               uint64
+	ServiceName            string
+	MetricName             string
+	MetricType             string
+	ResourceAttributes     map[string]string
+	ResourceSchemaUrl      string
+	ScopeName              string
+	ScopeVersion           string
+	ScopeAttributes        map[string]string
+	ScopeDroppedAttrCount  uint32
+	ScopeSchemaUrl         string
+	Attributes             map[string]string
+	AggregationTemporality int32
+	IsMonotonic            bool
+	MetricDescription      string
+	MetricUnit             string
+	FirstSeen              time.Time
+	LastSeen               time.Time
+}
+
 // MetricsStore defines the interface for storing metrics in ClickHouse.
 type MetricsStore interface {
 	CreateTables(ctx context.Context) error

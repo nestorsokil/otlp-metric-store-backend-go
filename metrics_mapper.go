@@ -2,12 +2,75 @@ package main
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"time"
 
+	"github.com/cespare/xxhash/v2"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 )
+
+// SeriesIdentity is the tuple of fields that uniquely identifies a series: two datapoints with
+// the same identity belong to the same time-stream and hash to the same SeriesId.
+type SeriesIdentity struct {
+	ServiceName        string
+	MetricName         string
+	MetricType         string
+	ResourceSchemaUrl  string
+	ScopeName          string
+	ScopeVersion       string
+	ScopeSchemaUrl     string
+	ResourceAttributes map[string]string
+	ScopeAttributes    map[string]string
+	Attributes         map[string]string
+}
+
+// seriesID derives the deterministic SeriesId for a series identity per the canonical
+// length-prefixed encoding (2-design.md SeriesId canonical encoding). Length-prefixing, not
+// delimiter-separation, is load-bearing: attribute keys/values are arbitrary user-controlled
+// UTF-8, so a naive "k=v,k=v" join collides deterministically when a value itself contains ","
+// or "=" (e.g. {a: "b,c=d"} and {a: "b", c: "d"} both render "a=b,c=d"). A length prefix is
+// unambiguous for any byte content, no escaping needed.
+func seriesID(identity SeriesIdentity) uint64 {
+	var buf []byte
+	buf = appendLengthPrefixed(buf, identity.ServiceName)
+	buf = appendLengthPrefixed(buf, identity.MetricName)
+	buf = appendLengthPrefixed(buf, identity.MetricType)
+	buf = appendLengthPrefixed(buf, identity.ResourceSchemaUrl)
+	buf = appendLengthPrefixed(buf, identity.ScopeName)
+	buf = appendLengthPrefixed(buf, identity.ScopeVersion)
+	buf = appendLengthPrefixed(buf, identity.ScopeSchemaUrl)
+	buf = appendEncodedMap(buf, identity.ResourceAttributes)
+	buf = appendEncodedMap(buf, identity.ScopeAttributes)
+	buf = appendEncodedMap(buf, identity.Attributes)
+	return xxhash.Sum64(buf)
+}
+
+// appendLengthPrefixed appends lp(s) = decimal(byte_len(s)) + ":" + s. Byte length (Go len), never
+// rune count, so the prefix agrees with the raw bytes that follow regardless of encoding.
+func appendLengthPrefixed(buf []byte, s string) []byte {
+	buf = strconv.AppendInt(buf, int64(len(s)), 10)
+	buf = append(buf, ':')
+	buf = append(buf, s...)
+	return buf
+}
+
+// appendEncodedMap appends lp(k)+lp(v) for every entry, iterated over keys sorted bytewise so
+// the encoding is independent of Go's randomized map iteration order.
+func appendEncodedMap(buf []byte, m map[string]string) []byte {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		buf = appendLengthPrefixed(buf, k)
+		buf = appendLengthPrefixed(buf, m[k])
+	}
+	return buf
+}
 
 // serviceName extracts the service.name from resource attributes, returning "" if not found.
 func serviceName(resource *resourcepb.Resource) string {
