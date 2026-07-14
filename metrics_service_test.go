@@ -113,6 +113,31 @@ func TestExport_SeriesInsertedBeforeDatapoints(t *testing.T) {
 	}
 }
 
+func TestExport_InBatchDuplicateSeriesInsertedOnce(t *testing.T) {
+	fake := &fakeMetricsStore{}
+	srv := newTestServer(fake)
+
+	req := gaugeExportRequest()
+	dataPoints := &req.ResourceMetrics[0].ScopeMetrics[0].Metrics[0].GetGauge().DataPoints
+	dp := (*dataPoints)[0]
+	// 10 datapoints of the same series identity in a single batch — a first-sight batch like this
+	// must still write exactly one series row, not one per datapoint (C-3).
+	for i := 0; i < 9; i++ {
+		*dataPoints = append(*dataPoints, dp)
+	}
+
+	if _, err := srv.Export(context.Background(), req); err != nil {
+		t.Fatalf("Export returned error: %v", err)
+	}
+
+	if len(fake.seriesCalls) != 1 || len(fake.seriesCalls[0]) != 1 {
+		t.Fatalf("expected exactly one series row inserted for 10 same-series datapoints in one batch, got %v", fake.seriesCalls)
+	}
+	if len(fake.gaugeCalls) != 1 || len(fake.gaugeCalls[0]) != 10 {
+		t.Fatalf("expected all 10 datapoint rows to still be inserted, got %v", fake.gaugeCalls)
+	}
+}
+
 func TestExport_RepeatedSeriesDedupedAcrossCalls(t *testing.T) {
 	fake := &fakeMetricsStore{}
 	srv := newTestServer(fake)

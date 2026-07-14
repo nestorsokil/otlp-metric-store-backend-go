@@ -102,6 +102,18 @@
   (`metrics_service.go`)
   - Spec: AC-7 (retries only close the loop if the client is told to retry)
   - Review: —
+- [x] [small] **11. In-batch series dedup before `InsertSeries`** — pre-existing gap surfaced by
+  code review: `MapGaugeRows`/`MapSumRows` emit one `SeriesRow` candidate per datapoint, and
+  `cache.MarkEmitted` only runs after the batch's `InsertSeries` succeeds — so within a single
+  first-sight batch, `ShouldEmit` says "emit" for every one of that series' datapoints, not just
+  the first. A batch of 10k datapoints for one new series writes 10k identical series rows,
+  against C-3's intent (series writes must not scale with datapoint count) and inflating
+  `series_registered_total`. Fix: collapse candidates to one row per `SeriesId`
+  (`map[uint64]SeriesRow`) before the `ShouldEmit` gate. Unit-test: a batch with N datapoints for
+  the same series inserts exactly one series row while still inserting all N datapoint rows.
+  (`metrics_service.go`)
+  - Spec: none (pre-existing defect, not an AC of this feature); intent traces to C-3
+  - Review: —
 
 ## Cut for scope (documented, not built)
 - Migration MV + its ClickHouse hash-parity expression (`4-migration.md` is a runbook, not code).

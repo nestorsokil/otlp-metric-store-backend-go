@@ -62,9 +62,21 @@ func (m *dash0MetricsServiceServer) Export(ctx context.Context, request *colmetr
 	candidates = append(candidates, gaugeSeries...)
 	candidates = append(candidates, sumSeries...)
 
-	toEmit := make([]SeriesRow, 0, len(candidates))
+	// Collapse to one row per SeriesId before gating: MapGaugeRows/MapSumRows emit one candidate
+	// per datapoint, and MarkEmitted only runs after this batch's InsertSeries succeeds — so
+	// without this, every datapoint of a first-sight series in the same batch would pass
+	// ShouldEmit and write a duplicate row, scaling series writes with datapoint count (against
+	// C-3's intent).
+	uniqueBySeriesId := make(map[uint64]SeriesRow, len(candidates))
 	for _, s := range candidates {
-		if m.cache.ShouldEmit(s.SeriesId, now) {
+		if _, ok := uniqueBySeriesId[s.SeriesId]; !ok {
+			uniqueBySeriesId[s.SeriesId] = s
+		}
+	}
+
+	toEmit := make([]SeriesRow, 0, len(uniqueBySeriesId))
+	for id, s := range uniqueBySeriesId {
+		if m.cache.ShouldEmit(id, now) {
 			toEmit = append(toEmit, s)
 		}
 	}
