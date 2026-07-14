@@ -64,7 +64,7 @@
   `truncated` flag. No `FINAL`. (`metrics_query.go`, `clickhouse_client.go`)
   - Spec: design §MetricsQuerier §Canonical read query, AC-3 AC-6, C-2
   - Review: —
-- [ ] [medium] **7. Read-path e2e integration test** — rewrite the suite for the new schema: send
+- [x] [medium] **7. Read-path e2e integration test** — rewrite the suite for the new schema: send
   Gauge+Sum via gRPC, assert retrieval **through `QueryDatapoints`** (no raw SQL in the test). Cover:
   (a) time-frame + `MetricType` only → all services/metrics of that type (AC-6); (b) optional filters
   narrow correctly; (c) `otel_series` holds one row per series after repeated datapoints — assert via
