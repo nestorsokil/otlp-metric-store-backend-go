@@ -28,11 +28,36 @@ import (
 // counts, series emitted vs. deduped) during a test run. Nothing in the test path calls
 // slog.SetDefault (that only happens in run()/main()), so the default handler's Info level would
 // otherwise silently drop those lines.
+//
+// OTEL_DEBUG=1 additionally calls setupOTelSDK, the same bootstrap main() uses, so the app's own
+// metrics/traces (metricsReceivedCounter, seriesRegisteredCounter, seriesCacheSizeGauge, and the
+// otelgrpc-generated spans for every RPC) print to stdout too. Separate from LOG_LEVEL because it's
+// far noisier — a span per gRPC call plus a periodic metrics dump — and independently useful (you
+// may want app logs without it, or it without Debug logs).
 func TestMain(m *testing.M) {
 	if os.Getenv("LOG_LEVEL") == "debug" {
 		slog.SetLogLoggerLevel(slog.LevelDebug)
 	}
-	os.Exit(m.Run())
+
+	ctx := context.Background()
+	shutdown := func(context.Context) error { return nil }
+	if os.Getenv("OTEL_DEBUG") == "1" {
+		var err error
+		shutdown, err = setupOTelSDK(ctx)
+		if err != nil {
+			log.Fatalf("setting up otel sdk: %v", err)
+		}
+	}
+
+	code := m.Run()
+
+	// Shutdown forces a final flush, so periodic/batched exporters still print even though the
+	// test run is far shorter than their normal export interval.
+	if err := shutdown(ctx); err != nil {
+		log.Printf("shutting down otel sdk: %v", err)
+	}
+
+	os.Exit(code)
 }
 
 func setupClickHouse(t *testing.T) (*ClickHouseMetricsStore, func()) {

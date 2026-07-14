@@ -21,11 +21,7 @@ make test-integration # integration tests against a real ClickHouse (testcontain
 make test-all
 ```
 
-Integration tests debug logs by default `Export` detail (datapoint counts, series emitted vs. deduped):
-
-```shell
-LOG_LEVEL=debug go test -tags integration -v .
-```
+Integration tests logs `debug` by default to see `Export` detail (datapoint counts, series emitted vs. deduped). Additionally it's possible to see stdout metrics and traces provided by setting `OTEL_DEBUG=1`.
 
 ## Design
 
